@@ -177,7 +177,7 @@ Copyright (c) 2025 DataLens.Tools
 ## 🌐 Links
 
 - 🌍 Website: [https://datalens.tools](https://datalens.tools)  
-- 🧑‍💻 GitHub: [DataLensTools](https://github.com/DataLensTools)  
+- 🧑‍💻 GitHub: [DataLensTools](https://github.com/TaufiaHussain/datalenstools-thermal-studio)  
 - ✉️ Contact: info@datalens.tools  
 
 
