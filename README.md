@@ -157,10 +157,11 @@ class ThermalFrame:
 
 ##  Author
 
+**Taufia Hussain** (Maintainer) — [LinkedIn](https://www.linkedin.com/in/taufia-hussain-52300015/) · [GitHub](https://github.com/TaufiaHussain) · info@datalens.tools
 **Developed by:** [DataLens.Tools](https://datalens.tools)  
 **© 2025 DataLens.Tools** — Open source for research and educational use.
 
----
+
 
 ##  License
 
