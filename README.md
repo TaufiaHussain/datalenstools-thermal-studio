@@ -33,15 +33,6 @@ It supports unified color normalization, quick statistics, video generation, and
 
 
 
-##  Screenshot
-
-*(optional: add a screenshot later)*  
-```
-![App Screenshot](docs/screenshot.png)
-```
-
-
-
 ##  Installation
 
 ### 1️ Clone the Repository
