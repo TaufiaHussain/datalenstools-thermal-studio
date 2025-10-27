@@ -27,9 +27,8 @@ import matplotlib.cm as cm
 import cv2  # opencv-python
 from fpdf import FPDF  # fpdf2
 
-# -----------------------------
 # Utilities
-# -----------------------------
+
 SUPPORTED_IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".tif", ".tiff"}
 SUPPORTED_MATRIX_EXTS = {".csv", ".npy"}
 
@@ -53,9 +52,8 @@ SK_FRAMES = "frames"
 SK_GLOBAL_MINMAX = "global_minmax"
 SK_TEMPLATE = "report_template"
 
-# -----------------------------
 # App Init
-# -----------------------------
+
 st.set_page_config(
     page_title="DataLens Thermal Studio",
     page_icon="🔥",
@@ -91,9 +89,7 @@ section[data-testid="stSidebar"] div[data-testid="stSidebarContent"]{
 </style>
 """, unsafe_allow_html=True)
 
-# -----------------------------
 # Helpers
-# -----------------------------
 
 def _load_unicode_font(pdf: FPDF) -> str:
     """
@@ -243,9 +239,8 @@ def build_pdf_report(frames: List[ThermalFrame], vmin: float, vmax: float, cmap:
         return bytes(out)
     return out.encode("latin-1")
 
-# -----------------------------
 # UI
-# -----------------------------
+
 with st.sidebar:
     st.title("DataLens Thermal Studio")
     page = st.radio("Navigate", [
@@ -271,9 +266,9 @@ with st.sidebar:
         '</div>',
         unsafe_allow_html=True
     )
-# -----------------------------
+
 # Pages
-# -----------------------------
+
 if page == "Home":
     st.header("Welcome 👋")
     st.write("This MVP lets you import thermal frames (CSV/NPY or images), normalize scales, render frames, create videos, and export a PDF report.")
