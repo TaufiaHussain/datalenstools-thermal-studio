@@ -12,26 +12,36 @@ Author: DataLens.Tools
 Run:  streamlit run app.py
 """
 from __future__ import annotations
+
 import io
 import os
-import base64
 from dataclasses import dataclass
 from typing import List, Tuple, Optional
 from pathlib import Path
+
 import numpy as np
 from PIL import Image
 import streamlit as st
 import pandas as pd
-import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 import cv2  # opencv-python
 from fpdf import FPDF  # fpdf2
 
-# Utilities
-
+# ------------------------------------------------------------------------------------
+# Constants / supported formats
+# ------------------------------------------------------------------------------------
 SUPPORTED_IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".tif", ".tiff"}
 SUPPORTED_MATRIX_EXTS = {".csv", ".npy"}
 
+# session keys
+SK_FRAMES = "frames"
+SK_GLOBAL_MINMAX = "global_minmax"
+SK_TEMPLATE = "report_template"
+
+
+# ------------------------------------------------------------------------------------
+# Data model
+# ------------------------------------------------------------------------------------
 @dataclass
 class ThermalFrame:
     name: str
@@ -47,39 +57,38 @@ class ThermalFrame:
             "p95": float(np.nanpercentile(t, 95)),
         }
 
-# session keys
-SK_FRAMES = "frames"
-SK_GLOBAL_MINMAX = "global_minmax"
-SK_TEMPLATE = "report_template"
 
-# App Init
-
+# ------------------------------------------------------------------------------------
+# Streamlit page config
+# ------------------------------------------------------------------------------------
 st.set_page_config(
     page_title="DataLens Thermal Studio",
     page_icon="🔥",
     layout="wide",
 )
 
+# init session
 if SK_FRAMES not in st.session_state:
-    st.session_state[SK_FRAMES]: List[ThermalFrame] = []
+    st.session_state[SK_FRAMES] = []  # type: List[ThermalFrame]
 if SK_GLOBAL_MINMAX not in st.session_state:
     st.session_state[SK_GLOBAL_MINMAX] = None  # (vmin, vmax)
 if SK_TEMPLATE not in st.session_state:
     st.session_state[SK_TEMPLATE] = {
         "title": "Thermal Analysis Report",
         "subtitle": "Generated with DataLens.Tools",
-        "footer": "Confidential — For internal use only",
+        "footer": "© 2025 DataLens.Tools — Confidential — For internal use only",
         "logo": None,
     }
 
-st.markdown("""
+# Sidebar styling
+st.markdown(
+    """
 <style>
-/* make sidebar a flex column to push footer to bottom */
 section[data-testid="stSidebar"] div[data-testid="stSidebarContent"]{
   display:flex; flex-direction:column; height:100%;
 }
 .sidebar-footer{
-  margin-top:auto;                   /* pushes it to the bottom */
+  margin-top:auto;
   padding:12px 10px;
   font-size:12px;
   color:#6b7280;
@@ -87,34 +96,41 @@ section[data-testid="stSidebar"] div[data-testid="stSidebarContent"]{
 }
 .sidebar-footer a{ color:inherit; text-decoration:none; font-weight:600; }
 </style>
-""", unsafe_allow_html=True)
+""",
+    unsafe_allow_html=True,
+)
 
+# ------------------------------------------------------------------------------------
 # Helpers
-
-def _load_unicode_font(pdf: FPDF) -> str:
+# ------------------------------------------------------------------------------------
+def _load_unicode_font_safe(pdf: FPDF) -> str:
     """
-    Register a Unicode TTF with FPDF and return its family name.
-    Falls back to Helvetica if the TTF isn't available.
+    Try to register a Unicode font (for local/dev use).
+    On Streamlit Cloud this may fail -> we return 'Helvetica' instead of crashing.
     """
     try:
-        # Codespaces/Ubuntu usually has DejaVu installed (or install via: sudo apt-get install -y fonts-dejavu)
+        # typical Linux path; if present we can use it
         base = Path("/usr/share/fonts/truetype/dejavu")
         regular = base / "DejaVuSans.ttf"
-        bold    = base / "DejaVuSans-Bold.ttf"
-        italic  = base / "DejaVuSans-Oblique.ttf"  # may not exist in some images
+        bold = base / "DejaVuSans-Bold.ttf"
+        italic = base / "DejaVuSans-Oblique.ttf"
 
-        pdf.add_font("DejaVu", "", str(regular), uni=True)
-        pdf.add_font("DejaVu", "B", str(bold), uni=True)
+        if regular.exists():
+            pdf.add_font("DejaVu", "", str(regular), uni=True)
+        if bold.exists():
+            pdf.add_font("DejaVu", "B", str(bold), uni=True)
         if italic.exists():
             pdf.add_font("DejaVu", "I", str(italic), uni=True)
         return "DejaVu"
     except Exception:
+        # cloud-safe fallback
         return "Helvetica"
 
+
 def read_temperature_from_image(img: Image.Image, min_c: float, max_c: float) -> np.ndarray:
-    """Convert a grayscale/pseudo-colored image to a temperature estimate.
+    """
+    Convert a grayscale/pseudo-colored image to a temperature estimate.
     Assumes pixel intensity ∈ [0,255] maps linearly to [min_c, max_c].
-    This is a fallback when true radiometric data are not available.
     """
     gray = np.array(img.convert("L"), dtype=np.float32)
     temp = min_c + (gray / 255.0) * (max_c - min_c)
@@ -165,18 +181,31 @@ def compute_global_minmax(frames: List[ThermalFrame]) -> Tuple[float, float]:
     return float(np.min(mins)), float(np.max(maxs))
 
 
-def make_video(frames: List[ThermalFrame], vmin: float, vmax: float, fps: int = 5, cmap: str = "inferno", as_gif=False) -> bytes:
+def make_video(
+    frames: List[ThermalFrame],
+    vmin: float,
+    vmax: float,
+    fps: int = 5,
+    cmap: str = "inferno",
+    as_gif: bool = False,
+) -> bytes:
     imgs = [np.array(render_thermal(f.temp, vmin, vmax, cmap)) for f in frames]
     h, w, _ = imgs[0].shape
 
     if as_gif:
-        # GIF via imageio (opencv can’t write GIF). Encode with PIL as fallback.
         frames_pil = [Image.fromarray(im) for im in imgs]
         buf = io.BytesIO()
-        frames_pil[0].save(buf, format="GIF", save_all=True, append_images=frames_pil[1:], duration=int(1000/fps), loop=0)
+        frames_pil[0].save(
+            buf,
+            format="GIF",
+            save_all=True,
+            append_images=frames_pil[1:],
+            duration=int(1000 / fps),
+            loop=0,
+        )
         return buf.getvalue()
 
-    # MP4 with OpenCV (requires FFMPEG backend available)
+    # MP4 with OpenCV (requires ffmpeg backend)
     fourcc = cv2.VideoWriter_fourcc(*"mp4v")
     tmp_path = "_tmp_dlt_thermal.mp4"
     out = cv2.VideoWriter(tmp_path, fourcc, fps, (w, h))
@@ -189,66 +218,92 @@ def make_video(frames: List[ThermalFrame], vmin: float, vmax: float, fps: int = 
     return data
 
 
-def build_pdf_report(frames: List[ThermalFrame], vmin: float, vmax: float, cmap: str, template: dict) -> bytes:
+# ------------------------------------------------------------------------------------
+# PDF builder (updated for Streamlit Cloud)
+# ------------------------------------------------------------------------------------
+def build_pdf_report(
+    frames: List[ThermalFrame],
+    vmin: float,
+    vmax: float,
+    cmap: str,
+    template: dict,
+) -> bytes:
     pdf = FPDF(unit="mm", format="A4")
     pdf.set_auto_page_break(auto=True, margin=12)
 
-    font_family = _load_unicode_font(pdf)  # Unicode-safe font (e.g., DejaVu)
+    # try unicode -> fallback to Helvetica
+    font_family = _load_unicode_font_safe(pdf)
+    if font_family is None:
+        font_family = "Helvetica"
 
-    # Cover
+    # ----- Cover page -----
     pdf.add_page()
     pdf.set_font(font_family, "B", 20)
     pdf.cell(0, 12, template.get("title", "Thermal Analysis Report"), ln=1, align="C")
+
     pdf.set_font(font_family, "", 12)
     pdf.cell(0, 8, template.get("subtitle", "Generated with DataLens.Tools"), ln=1, align="C")
 
-    # Body: 2 frames per page
+    # ----- Body pages (2 frames per page) -----
     for i, fr in enumerate(frames):
+        # new page for every 2 frames
         if i % 2 == 0:
             pdf.add_page()
 
         img = render_thermal(fr.temp, vmin, vmax, cmap)
         img_bytes = to_bytes(img, fmt="PNG")
 
+        # positions
         x = 15
         y = 20 if (i % 2 == 0) else 150
-        pdf.image(io.BytesIO(img_bytes), x=x, y=y, w=90)
+
+        # fpdf2 can take a BytesIO + explicit type
+        img_stream = io.BytesIO(img_bytes)
+        pdf.image(img_stream, x=x, y=y, w=90, type="PNG")
 
         stats = fr.stats
+
         pdf.set_xy(x + 100, y)
         pdf.set_font(font_family, "B", 12)
         pdf.cell(0, 8, fr.name, ln=1)
+
         pdf.set_font(font_family, "", 11)
         pdf.set_x(x + 100)
         pdf.multi_cell(
-            0, 6,
+            0,
+            6,
             f"Min: {stats['min']:.2f} °C\n"
             f"Max: {stats['max']:.2f} °C\n"
             f"Mean: {stats['mean']:.2f} °C\n"
-            f"95th pct: {stats['p95']:.2f} °C"
+            f"95th pct: {stats['p95']:.2f} °C",
         )
 
-    # Footer
+    # ----- Footer page -----
     pdf.add_page()
     pdf.set_font(font_family, "I", 10)
-    pdf.multi_cell(0, 6, template.get("footer", ""))
+    footer_text = template.get(
+        "footer",
+        "© 2025 DataLens.Tools — Thermal Studio",
+    )
+    pdf.multi_cell(0, 6, footer_text)
 
-    # fpdf2 returns a bytearray for dest="S"; old pyfpdf returned str
     out = pdf.output(dest="S")
     if isinstance(out, (bytes, bytearray)):
         return bytes(out)
     return out.encode("latin-1")
 
-# UI
 
+# ------------------------------------------------------------------------------------
+# Sidebar (navigation + global scale)
+# ------------------------------------------------------------------------------------
 with st.sidebar:
     st.title("DataLens Thermal Studio")
-    page = st.radio("Navigate", [
-        "Home", "Import & Preview", "Batch Processing", "Video Creator", "Report", "Settings"
-    ])
+    page = st.radio(
+        "Navigate",
+        ["Home", "Import & Preview", "Batch Processing", "Video Creator", "Report", "Settings"],
+    )
     st.caption("MVP • Streamlit Edition")
 
-# Global controls shown on most pages
 with st.sidebar:
     st.markdown("---")
     st.subheader("Global Scale")
@@ -258,30 +313,41 @@ with st.sidebar:
         vmax = st.number_input("Max °C", value=60.0)
     else:
         vmin = vmax = None  # computed dynamically
-    cmap = st.selectbox("Colormap", ["inferno", "plasma", "magma", "turbo", "viridis", "jet"])  # user choice
+
+    cmap = st.selectbox("Colormap", ["inferno", "plasma", "magma", "turbo", "viridis", "jet"])
 
     st.markdown(
         '<div class="sidebar-footer">© 2025 '
         '<a href="https://datalens.tools" target="_blank">DataLens.Tools</a>'
-        '</div>',
-        unsafe_allow_html=True
+        "</div>",
+        unsafe_allow_html=True,
     )
 
+# ------------------------------------------------------------------------------------
 # Pages
-
+# ------------------------------------------------------------------------------------
 if page == "Home":
     st.header("Welcome 👋")
-    st.write("This MVP lets you import thermal frames (CSV/NPY or images), normalize scales, render frames, create videos, and export a PDF report.")
-    st.info("Tip: For true radiometric FLIR data, export temperature matrices to CSV/NPY and load them here. If you load plain images, the app will estimate temperatures from grayscale intensities.")
+    st.write(
+        "This MVP lets you import thermal frames (CSV/NPY or images), "
+        "normalize scales, render frames, create videos, and export a PDF report."
+    )
+    st.info(
+        "Tip: For true radiometric FLIR data, export temperature matrices to CSV/NPY "
+        "and load them here. If you load plain images, the app will estimate temperatures from grayscale intensities."
+    )
 
 elif page == "Import & Preview":
     st.header("Import & Preview")
-    c1, c2 = st.columns([2,1])
+    c1, c2 = st.columns([2, 1])
     with c1:
         st.subheader("Upload files")
         min_c = st.number_input("Assumed min °C (for image → temp mapping)", value=20.0)
         max_c = st.number_input("Assumed max °C (for image → temp mapping)", value=60.0)
-        files = st.file_uploader("Drop thermal images (PNG/JPG/TIFF) or matrices (CSV/NPY)", accept_multiple_files=True)
+        files = st.file_uploader(
+            "Drop thermal images (PNG/JPG/TIFF) or matrices (CSV/NPY)",
+            accept_multiple_files=True,
+        )
         if files:
             new_frames = []
             for f in files:
@@ -315,7 +381,10 @@ elif page == "Import & Preview":
         for i, fr in enumerate(frames):
             with cols[i % grid_cols]:
                 img = render_thermal(fr.temp, vmin_now, vmax_now, cmap)
-                st.image(img, caption=f"{fr.name} | min {fr.stats['min']:.1f}°C, max {fr.stats['max']:.1f}°C")
+                st.image(
+                    img,
+                    caption=f"{fr.name} | min {fr.stats['min']:.1f}°C, max {fr.stats['max']:.1f}°C",
+                )
 
 elif page == "Batch Processing":
     st.header("Batch Processing")
@@ -324,16 +393,27 @@ elif page == "Batch Processing":
         st.warning("No frames loaded yet. Go to 'Import & Preview' first.")
     else:
         vmin_now, vmax_now = st.session_state[SK_GLOBAL_MINMAX]
-        st.write(f"Using unified scale: **{vmin_now:.2f}–{vmax_now:.2f} °C** | Colormap: **{cmap}**")
-        # Export normalized PNGs
+        st.write(
+            f"Using unified scale: **{vmin_now:.2f}–{vmax_now:.2f} °C** | Colormap: **{cmap}**"
+        )
+
+        # export normalized PNGs
         if st.button("Export normalized PNGs (zip)"):
-            import zipfile, tempfile
+            import zipfile
+
             tmp = io.BytesIO()
-            with zipfile.ZipFile(tmp, 'w', zipfile.ZIP_DEFLATED) as z:
+            with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as z:
                 for fr in frames:
                     img = render_thermal(fr.temp, vmin_now, vmax_now, cmap)
-                    z.writestr(os.path.splitext(fr.name)[0] + "_normalized.png", to_bytes(img))
-            st.download_button("Download PNGs.zip", data=tmp.getvalue(), file_name="normalized_frames.zip")
+                    z.writestr(
+                        os.path.splitext(fr.name)[0] + "_normalized.png",
+                        to_bytes(img),
+                    )
+            st.download_button(
+                "Download PNGs.zip",
+                data=tmp.getvalue(),
+                file_name="normalized_frames.zip",
+            )
 
         st.markdown("### Table of statistics")
         df = pd.DataFrame([{"file": f.name, **f.stats} for f in frames])
@@ -364,12 +444,22 @@ elif page == "Report":
         vmin_now, vmax_now = st.session_state[SK_GLOBAL_MINMAX]
         with st.expander("Template settings"):
             t = st.session_state[SK_TEMPLATE]
-            t["title"] = st.text_input("Title", t["title"]) 
-            t["subtitle"] = st.text_input("Subtitle", t["subtitle"]) 
-            t["footer"] = st.text_area("Footer", t["footer"]) 
+            t["title"] = st.text_input("Title", t["title"])
+            t["subtitle"] = st.text_input("Subtitle", t["subtitle"])
+            t["footer"] = st.text_area("Footer", t["footer"])
         if st.button("Build PDF"):
-            pdf_bytes = build_pdf_report(frames, vmin_now, vmax_now, cmap, st.session_state[SK_TEMPLATE])
-            st.download_button("Download report.pdf", data=pdf_bytes, file_name="thermal_report.pdf")
+            pdf_bytes = build_pdf_report(
+                frames,
+                vmin_now,
+                vmax_now,
+                cmap,
+                st.session_state[SK_TEMPLATE],
+            )
+            st.download_button(
+                "Download report.pdf",
+                data=pdf_bytes,
+                file_name="thermal_report.pdf",
+            )
 
 elif page == "Settings":
     st.header("Settings")
@@ -386,4 +476,6 @@ fpdf2
         """,
         language="bash",
     )
-    st.caption("Note: MP4 export requires an FFmpeg-enabled OpenCV build on your system. Use GIF if MP4 fails.")
+    st.caption(
+        "Note: MP4 export requires an FFmpeg-enabled OpenCV build on your system. Use GIF if MP4 fails."
+    )
