@@ -231,10 +231,8 @@ def build_pdf_report(
     pdf = FPDF(unit="mm", format="A4")
     pdf.set_auto_page_break(auto=True, margin=12)
 
-    # try unicode -> fallback to Helvetica
-    font_family = _load_unicode_font_safe(pdf)
-    if font_family is None:
-        font_family = "Helvetica"
+    # try unicode first, but it may not have italic on Streamlit Cloud
+    font_family = _load_unicode_font_safe(pdf) or "Helvetica"
 
     # ----- Cover page -----
     pdf.add_page()
@@ -257,7 +255,7 @@ def build_pdf_report(
         x = 15
         y = 20 if (i % 2 == 0) else 150
 
-        # fpdf2 can take a BytesIO + explicit type
+        # explicit PNG so fpdf2 doesn’t guess
         img_stream = io.BytesIO(img_bytes)
         pdf.image(img_stream, x=x, y=y, w=90, type="PNG")
 
@@ -280,11 +278,18 @@ def build_pdf_report(
 
     # ----- Footer page -----
     pdf.add_page()
-    pdf.set_font(font_family, "I", 10)
     footer_text = template.get(
         "footer",
         "© 2025 DataLens.Tools — Thermal Studio",
     )
+
+    # 🔐 this is the important part:
+    # try italic → if the font doesn't have it, fall back to normal
+    try:
+        pdf.set_font(font_family, "I", 10)
+    except Exception:
+        pdf.set_font(font_family, "", 10)
+
     pdf.multi_cell(0, 6, footer_text)
 
     out = pdf.output(dest="S")
@@ -327,7 +332,7 @@ with st.sidebar:
 # Pages
 # ------------------------------------------------------------------------------------
 if page == "Home":
-    st.header("Welcome 👋")
+    st.header("Welcome")
     st.write(
         "This MVP lets you import thermal frames (CSV/NPY or images), "
         "normalize scales, render frames, create videos, and export a PDF report."
